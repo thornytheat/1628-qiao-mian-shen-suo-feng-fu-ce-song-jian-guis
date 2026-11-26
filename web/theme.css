@@ -1,0 +1,6 @@
+:root {
+  --bg:#f7f4e8; --surface:#fdfbf1; --ink:#29302b; --muted:#5a6352; --line:#cacdb9;
+  --accent:#486544; --accent-soft:#dce7d5; --warning:#773c33; --button-text:#fdfbf1;
+  --font-ui:"Songti SC", "Noto Serif CJK SC", Georgia, serif; --font-display:"Songti SC", Georgia, serif; --font-num:Georgia, "Songti SC", serif;
+  --radius:0px; --pad:20px; --gap:0px; --row:36px; --control:38px;
+}
