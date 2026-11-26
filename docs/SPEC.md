@@ -6,6 +6,18 @@
 
 业务组包括快速路引桥、公交支廊、互通匝道、沿江跨线。同一 `case_id` 的同版本异值记录整笔隔离，重复记录只计一笔。
 
+## 校尺差与时点
+
+批次可附 `ruler_calibrations`（也兼容 `ruler_corrections`、`calibrations` 等同义列表名）。校尺记录至少包含尺编号、带符号校尺差 `correction_mm` 和确认日 `confirmed_day`；可用 `day`、`start_day/end_day` 或 `period` 标明有效时段。测量单以顶层 `ruler_id` 指明当天使用的尺。
+
+净宽换算统一为：
+
+```text
+corrected_reading = raw_reading + correction_mm
+```
+
+训练冻结、回放参考日和当班快照分别只使用各自截止日前已确认且在测量当天有效的校尺差。截止后确认的记录对该次重算不可见，下一快照日才进入换算。缺少有效校尺差，或同一把尺在同一有效时段存在不同校尺差时，该单以 `RULER_CORRECTION_MISSING` / `RULER_CORRECTION_CONFLICT` 转人工（证据中同时给出 `RULER_CALIBRATION_*` 别名），不进入候选、不占用复测车额度。未携带 `ruler_id` 的旧单保持原流程。逐单结果和送检联 schedule ticket 附 `calibration_basis`（同份依据也以 `ruler_basis`、`校尺依据` 暴露）。
+
 | 信号源 | 含义 | 接受范围 |
 | --- | --- | --- |
 | `reading` | 伸缩缝净宽 mm | 3 至 80 |

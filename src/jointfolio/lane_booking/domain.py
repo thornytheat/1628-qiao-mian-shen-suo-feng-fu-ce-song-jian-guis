@@ -31,6 +31,20 @@ def project_request(card, gate, calendar_day=None) -> Request:
     elif priority <= 0:
         status, reason, details = "monitor", "BELOW_ACTION", ("预计收益未达到处置阈值",)
 
+    ruler_id = getattr(record, "ruler_id", None)
+    ruler_status = getattr(record, "ruler_status", None)
+    ruler_reason = getattr(record, "ruler_reason", None) or None
+    ruler_basis = getattr(record, "ruler_basis", None)
+    if not ruler_id:
+        ruler_status = None
+        ruler_reason = None
+        ruler_basis = None
+    elif not ruler_reason:
+        ruler_reason = (
+            "RULER_CORRECTION_CONFLICT"
+            if ruler_status == "CONFLICT"
+            else "RULER_CORRECTION_MISSING"
+        )
     return Request(
         record.case_id,
         record.group,
@@ -47,6 +61,11 @@ def project_request(card, gate, calendar_day=None) -> Request:
         reason,
         details,
         ACTION_LABEL,
+        ruler_id=ruler_id,
+        ruler_status=ruler_status,
+        ruler_reason=ruler_reason,
+        ruler_basis=ruler_basis,
+        calibration_basis=ruler_basis,
     )
 
 

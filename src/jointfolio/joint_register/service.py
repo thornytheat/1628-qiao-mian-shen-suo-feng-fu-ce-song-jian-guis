@@ -1,6 +1,13 @@
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from ..ruler_calibration.service import (
+    RulerBook,
+    apply_book,
+    extract_calibration_rows,
+    is_calibration_stream_key,
+    parse_calibrations,
+)
 from .book import MAX_RECORDS, arrival_reason, observation, outcome, read_stream
 from .contracts import Intake, Observation, Outcome, Rejection
 
@@ -17,17 +24,36 @@ def sample(root: Path) -> dict:
 
 
 def stage(packet: dict, as_of: int) -> Intake:
-    if not isinstance(packet, dict) or set(packet) != {"observations", "outcomes"}:
+    if not isinstance(packet, dict) or not {"observations", "outcomes"} <= set(packet):
+        raise ValueError("批次应包含 observations 和 outcomes 两份记录")
+    unknown = {
+        key
+        for key in packet
+        if key not in {"observations", "outcomes"}
+        and not is_calibration_stream_key(key)
+    }
+    if unknown:
         raise ValueError("批次应包含 observations 和 outcomes 两份记录")
     if type(as_of) is not int or not 2 <= as_of <= 36_500:
         raise ValueError("批次日超出接受范围")
-    for stream in packet.values():
-        if not isinstance(stream, list) or len(stream) > MAX_RECORDS:
-            raise ValueError(f"每份记录须为列表，最多 {MAX_RECORDS} 条")
+    for key, stream in packet.items():
+        if key in {"observations", "outcomes"}:
+            if not isinstance(stream, list) or len(stream) > MAX_RECORDS:
+                raise ValueError(f"每份记录须为列表，最多 {MAX_RECORDS} 条")
+        elif is_calibration_stream_key(key):
+            if isinstance(stream, dict):
+                continue
+            if not isinstance(stream, list) or len(stream) > MAX_RECORDS:
+                raise ValueError(f"每份记录须为列表，最多 {MAX_RECORDS} 条")
     rejection_counts = Counter()
 
     def reject(code, stream, case_id, detail, count=1):
         rejection_counts[code, stream, case_id, detail] += count
+
+    calibration_rows = extract_calibration_rows(packet)
+    calibrations, calibration_issues = parse_calibrations(calibration_rows)
+    for ruler_id, detail in calibration_issues:
+        reject("INVALID", "ruler_calibration", ruler_id, detail)
 
     revisions: dict[str, list[Observation]] = defaultdict(list)
     for row in packet["observations"]:
@@ -117,9 +143,16 @@ def stage(packet: dict, as_of: int) -> Intake:
         Rejection(*key, occurrences=count)
         for key, count in sorted(rejection_counts.items())
     )
-    return Intake(
-        entries, tuple(outcomes), rejections, {k: len(v) for k, v in packet.items()}
+    intake = Intake(
+        entries,
+        tuple(outcomes),
+        rejections,
+        {k: len(v) for k, v in packet.items() if isinstance(v, list)},
+        calibrations=calibrations,
+        ruler_book=RulerBook(calibrations, as_of),
     )
+    intake, _ = apply_book(intake, intake.ruler_book)
+    return intake
 
 
 def known_labels(intake: Intake, day: int) -> dict[str, Outcome]:

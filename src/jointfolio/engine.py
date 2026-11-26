@@ -22,6 +22,12 @@ from .lane_booking.service import (
     summarize_workload,
 )
 from .inspector_sheet.service import compile_delivery
+from .ruler_calibration import (
+    RulerBook,
+    apply_ruler_corrections,
+    correct_reading,
+    effective_correction,
+)
 from .settings import DEFAULT_BUDGET, DEFAULT_DAY, FIELD_BOUNDS, CRITICAL_FIELDS
 from dataclasses import replace
 
@@ -56,6 +62,21 @@ def plan(packet=None, *, as_of=DEFAULT_DAY, capacity=DEFAULT_BUDGET):
     details = {}
     for signal in ready:
         rules = decide(signal, shifts, assessment.test_passed, history)
+        if signal.record.ruler_id and signal.record.ruler_status in {
+            "MISSING",
+            "CONFLICT",
+        }:
+            ruler_reason = signal.record.ruler_reason or (
+                "RULER_CORRECTION_CONFLICT"
+                if signal.record.ruler_status == "CONFLICT"
+                else "RULER_CORRECTION_MISSING"
+            )
+            rules = replace(
+                rules,
+                allowed=False,
+                reasons=(*rules.reasons, ruler_reason),
+                source="incumbent",
+            )
         estimate = score_card(model, assessment, signal)
         fields = signal.record.reported
         filled = {
@@ -78,6 +99,14 @@ def plan(packet=None, *, as_of=DEFAULT_DAY, capacity=DEFAULT_BUDGET):
             )
             rules = replace(rules, allowed=False, reasons=reasons, source="incumbent")
         decisions.append((estimate, rules))
+        ruler_basis = signal.record.ruler_basis or {}
+        ruler_sources = ruler_basis.get("sources")
+        if ruler_sources is None:
+            ruler_sources = ruler_basis.get("conflicting_records") or (
+                [ruler_basis["calibration"]]
+                if ruler_basis.get("calibration")
+                else []
+            )
         details[signal.record.case_id] = {
             **trace(signal),
             "trained_estimate": estimate.estimate,
@@ -87,6 +116,40 @@ def plan(packet=None, *, as_of=DEFAULT_DAY, capacity=DEFAULT_BUDGET):
             "operational_check": operating,
             "operating_context": local,
             "sensitivity": measure_sensitivity(signal, bank, ("axles", "lane_min")),
+            "ruler_id": signal.record.ruler_id,
+            "ruler_status": signal.record.ruler_status,
+            "ruler_reason": signal.record.ruler_reason or None,
+            "ruler_calibration_reason": next(
+                (
+                    code
+                    for code in ruler_basis.get("reason_aliases", [])
+                    if code.startswith("RULER_CALIBRATION_")
+                ),
+                None,
+            ),
+            "reason_aliases": [
+                code
+                for code in (
+                    signal.record.ruler_reason,
+                    *ruler_basis.get("reason_aliases", []),
+                )
+                if code
+            ],
+            "ruler_correction_mm": ruler_basis.get("correction_mm", 0.0),
+            "raw_reading": signal.record.raw_reading,
+            "net_width": ruler_basis.get("net_width"),
+            "corrected_reading": ruler_basis.get(
+                "corrected_reading", signal.record.reported.get("reading")
+            ),
+            "ruler_basis": ruler_basis,
+            "ruler_correction_basis": ruler_basis,
+            "basis": ruler_basis,
+            "calibration_basis": ruler_basis,
+            "calibration_records": ruler_sources,
+            "used_calibration": ruler_basis.get("calibration"),
+            "ruler_calibration": ruler_basis,
+            "calibration_evidence": ruler_basis,
+            "校尺依据": ruler_basis,
         }
     result = allocate(decisions, capacity, as_of)
     return compile_delivery(

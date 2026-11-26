@@ -21,6 +21,19 @@ def build_schedule(decisions):
                 "resource_units": row.units,
                 "running_units": cumulative,
                 "instruction": row.next_step,
+                **(
+                    {
+                        "ruler_id": row.ruler_id,
+                        "ruler_correction_mm": (row.ruler_basis or {}).get(
+                            "correction_mm"
+                        ),
+                        "calibration_basis": row.calibration_basis
+                        or row.ruler_basis,
+                        "校尺依据": row.calibration_basis or row.ruler_basis,
+                    }
+                    if row.ruler_id and (row.calibration_basis or row.ruler_basis)
+                    else {}
+                ),
             }
             for row, cumulative in zip(group, totals)
         ]

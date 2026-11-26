@@ -4,6 +4,20 @@ from statistics import median
 from ..settings import FIELD_BOUNDS, SIGNAL_NAMES
 
 
+def apply_reading_correction(
+    reading: float | None, correction_mm: float = 0.0
+) -> float | None:
+    """把带符号校尺差加到尺读数上，得到训练/回放/推理共用的净宽。"""
+    if reading is None:
+        return None
+    return round(float(reading) + float(correction_mm), 9)
+
+
+correct_reading = apply_reading_correction
+calibrated_reading = apply_reading_correction
+net_width = apply_reading_correction
+
+
 def domain_factors(filled: dict[str, float]) -> tuple[float, ...]:
     """桥面伸缩缝复测送检的业务量从原始单位换算，顺序固定供训练和回放共用。"""
     reading = filled["reading"]

@@ -18,6 +18,11 @@ class Request:
     reason: str
     details: tuple[str, ...]
     next_step: str
+    ruler_id: str | None = None
+    ruler_status: str | None = None
+    ruler_reason: str | None = None
+    ruler_basis: dict | None = None
+    calibration_basis: dict | None = None
 
 
 @dataclass(frozen=True)

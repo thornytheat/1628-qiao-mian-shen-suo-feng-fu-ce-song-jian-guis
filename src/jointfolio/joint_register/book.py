@@ -3,6 +3,7 @@ from math import isfinite
 from pathlib import Path
 import re
 
+from ..ruler_calibration.service import extract_ruler_id
 from ..settings import FIELD_BOUNDS, GROUPS, REPORT_LAG, TARGET
 from .contracts import Observation, Outcome
 
@@ -63,12 +64,48 @@ def observation(row: dict) -> Observation:
     if not isinstance(row.get("group"), str) or row["group"] not in GROUPS:
         raise ValueError("业务分组不在档案内")
     clock = integer(row.get("clock"), 0, 95, "15 分钟时段")
+    ruler_id = extract_ruler_id(row)
+    ruler_period = row.get(
+        "ruler_period", row.get("calibration_period", row.get("period"))
+    )
+    if isinstance(ruler_period, dict):
+        ruler_period = (
+            ruler_period.get("id")
+            or ruler_period.get("period_id")
+            or ruler_period.get("name")
+        )
+    if ruler_period is not None:
+        ruler_period = str(ruler_period)
     fields = row.get("measurements")
-    if not isinstance(fields, dict) or set(fields) - FIELD_BOUNDS.keys():
+    if not isinstance(fields, dict):
+        raise ValueError("测量字段与单据档案不一致")
+    measurement_fields = dict(fields)
+    nested_ruler = extract_ruler_id(measurement_fields)
+    if nested_ruler is not None:
+        ruler_id = ruler_id or nested_ruler
+    for key in list(measurement_fields):
+        compact = re.sub(r"[^a-z0-9]", "", str(key).lower())
+        looks_like_ruler = compact in {
+            "rulerid",
+            "ruler",
+            "gaugeid",
+            "gauge",
+            "tapeid",
+            "tape",
+            "scaleid",
+            "meterid",
+            "instrumentid",
+        } or (
+            "ruler" in compact
+            and any(part in compact for part in ("id", "code", "no", "number"))
+        )
+        if looks_like_ruler:
+            measurement_fields.pop(key)
+    if set(measurement_fields) - FIELD_BOUNDS.keys():
         raise ValueError("测量字段与单据档案不一致")
     reported = {}
     for field, (lower, upper) in FIELD_BOUNDS.items():
-        value = fields.get(field)
+        value = measurement_fields.get(field)
         if value is not None:
             value = number(value, field)
             if not lower <= value <= upper:
@@ -76,7 +113,18 @@ def observation(row: dict) -> Observation:
             if upper == 1 and lower == 0 and value not in (0, 1):
                 raise ValueError(f"{field} 只接收 0 或 1")
         reported[field] = value
-    return Observation(case_id, row["group"], day, arrived, revision, clock, reported)
+    return Observation(
+        case_id,
+        row["group"],
+        day,
+        arrived,
+        revision,
+        clock,
+        reported,
+        ruler_id=ruler_id,
+        raw_reading=reported["reading"],
+        ruler_period=ruler_period,
+    )
 
 
 def outcome(row: dict) -> Outcome:

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..joint_register.contracts import Observation
 
@@ -10,6 +10,9 @@ class Signal:
     normalized: tuple[float, ...]
     missing: tuple[str, ...]
     reference: str
+    fills: dict[str, float] | None = field(default=None, compare=False)
+    centers: tuple[float, ...] | None = field(default=None, compare=False)
+    scales: tuple[float, ...] | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

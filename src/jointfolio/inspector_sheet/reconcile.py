@@ -63,11 +63,27 @@ def export_table(body):
         "status",
         "reason",
         "source",
+        "ruler_id",
+        "ruler_status",
+        "ruler_reason",
+        "ruler_correction_mm",
+        "raw_reading",
+        "corrected_reading",
+        "calibration_basis",
         "next_step",
     )
     writer = csv.DictWriter(rows, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
-    writer.writerows(body["decisions"])
+    export_rows = []
+    for record in body["decisions"]:
+        row = dict(record)
+        basis = row.get("calibration_basis")
+        if isinstance(basis, (dict, list)):
+            row["calibration_basis"] = json.dumps(
+                basis, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        export_rows.append(row)
+    writer.writerows(export_rows)
     return rows.getvalue()
 
 

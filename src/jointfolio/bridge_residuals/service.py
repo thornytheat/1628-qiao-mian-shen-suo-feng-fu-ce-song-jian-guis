@@ -4,6 +4,7 @@ from dataclasses import replace
 from ..joint_register.service import known_labels
 from ..joint_sen_fit.service import score
 from ..settings import METRIC_LABEL, TARGET
+from ..thermal_alignment.service import signal_at_knowledge_cutoff
 from .contracts import Assessment, Folds, Paired, ScoreCard
 from .evaluation import apply_calibration, calibrate, evaluate, percentile
 
@@ -14,20 +15,27 @@ def split(as_of):
 
 def paired(signals, intake, after, before, reference_day, model):
     labels = known_labels(intake, reference_day)
-    return [
-        Paired(
-            item.record.case_id,
-            item.record.group,
-            labels[item.record.case_id].value,
-            score(model, item),
-            score(model, item, baseline=True),
-            labels[item.record.case_id].occurred,
+    ruler_book = getattr(intake, "ruler_book", None)
+    rows = []
+    for item in signals:
+        if not (
+            after <= item.record.day < before
+            and item.record.arrived <= reference_day
+            and item.record.case_id in labels
+        ):
+            continue
+        effective = signal_at_knowledge_cutoff(item, ruler_book, reference_day)
+        rows.append(
+            Paired(
+                effective.record.case_id,
+                effective.record.group,
+                labels[effective.record.case_id].value,
+                score(model, effective),
+                score(model, effective, baseline=True),
+                labels[effective.record.case_id].occurred,
+            )
         )
-        for item in signals
-        if after <= item.record.day < before
-        and item.record.arrived <= reference_day
-        and item.record.case_id in labels
-    ]
+    return rows
 
 
 def backcheck(signals, intake, bounds, model):

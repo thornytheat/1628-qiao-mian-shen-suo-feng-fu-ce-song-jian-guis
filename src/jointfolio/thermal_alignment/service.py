@@ -1,11 +1,21 @@
 from collections import defaultdict
+from dataclasses import replace
 from statistics import median
 
 from ..joint_register.contracts import Observation
 from ..settings import FIELD_BOUNDS, GROUPS, REPORT_LAG, SIGNAL_NAMES
 from .contracts import FeatureBank, Scale, Signal
 from .coverage import fit_audit, measure_sensitivity, reference_summary
-from .domain import default_fills, domain_factors, robust_scale, usable_report
+from .domain import (
+    apply_reading_correction,
+    calibrated_reading,
+    correct_reading,
+    default_fills,
+    domain_factors,
+    net_width,
+    robust_scale,
+    usable_report,
+)
 
 
 MIN_GROUP = 14
@@ -65,17 +75,70 @@ def encode(record: Observation, bank: FeatureBank) -> Signal:
         )
     )
     missing = tuple(key for key, value in record.reported.items() if value is None)
-    return Signal(record, raw, norm, missing, record.group if subgroup else "全域")
+    return Signal(
+        record,
+        raw,
+        norm,
+        missing,
+        record.group if subgroup else "全域",
+        fills=scale.fills,
+        centers=bank.global_scale.centers,
+        scales=bank.global_scale.slopes,
+    )
+
+
+def signal_at_knowledge_cutoff(signal: Signal, ruler_book, cutoff: int) -> Signal:
+    """Recompute the reading feature with only calibrations confirmed by cutoff."""
+    if ruler_book is None or not getattr(signal.record, "ruler_id", None):
+        return signal
+    book = ruler_book.at(cutoff) if hasattr(ruler_book, "at") else ruler_book
+    verdict = book.verdict_for_observation(signal.record)
+    reported = dict(signal.record.reported)
+    if verdict.status == "APPLIED" and verdict.corrected_reading is not None:
+        reported["reading"] = verdict.corrected_reading
+    else:
+        # Before a correction is confirmed/resolved, folds use the raw reading.
+        reported["reading"] = signal.record.raw_reading
+    fills = signal.fills or default_fills()
+    filled = usable_report(reported, fills)
+    raw = domain_factors(filled)
+    if signal.centers is not None and signal.scales is not None:
+        norm = tuple(
+            max(-12.0, min(12.0, (value - center) / step))
+            for value, center, step in zip(raw, signal.centers, signal.scales)
+        )
+    else:
+        norm = signal.normalized
+    missing = tuple(key for key, value in reported.items() if value is None)
+    record = replace(
+        signal.record,
+        reported=reported,
+        ruler_status=verdict.status,
+        ruler_reason=verdict.reason,
+        ruler_basis=verdict.basis,
+    )
+    return replace(
+        signal,
+        record=record,
+        vector=raw,
+        normalized=norm,
+        missing=missing,
+        fills=fills,
+    )
 
 
 def trace(signal: Signal) -> dict:
+    measurements = dict(signal.record.reported)
+    if getattr(signal.record, "ruler_id", None) and signal.record.raw_reading is not None:
+        measurements["reading"] = signal.record.raw_reading
     return {
         "case_id": signal.record.case_id,
         "feature_reference": signal.reference,
         "missing": list(signal.missing),
         "features": dict(zip(SIGNAL_NAMES, signal.vector)),
         "standardized": dict(zip(SIGNAL_NAMES, signal.normalized)),
-        "measurements": signal.record.reported,
+        "measurements": measurements,
+        "net_width_reading": signal.record.reported.get("reading"),
         "decision_day": signal.record.day + REPORT_LAG,
     }
 

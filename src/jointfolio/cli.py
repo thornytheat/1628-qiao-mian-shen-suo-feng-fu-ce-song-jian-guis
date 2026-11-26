@@ -28,6 +28,9 @@ def _arguments():
                     "replay",
                     "shift",
                     "resources",
+                    "ruler",
+                    "ruler_calibration",
+                    "calibration",
                 ],
             )
         elif verb == "export":
@@ -73,7 +76,10 @@ def main():
             _payload(options.packet), as_of=options.snapshot, capacity=options.capacity
         )
         if options.command == "inspect":
-            print(_json(evidence(result.body, options.step)))
+            step = options.step
+            if step in {"ruler_calibration", "calibration"}:
+                step = "ruler"
+            print(_json(evidence(result.body, step)))
         elif options.command == "export":
             options.destination.write_text(
                 export_table(result.body), encoding="utf-8-sig"

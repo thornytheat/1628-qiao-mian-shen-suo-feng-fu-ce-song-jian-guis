@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
@@ -16,6 +16,7 @@ from .measurement_register.contracts import RevisionConflict, UnknownRelease
 from .measurement_register.history import release_changes
 from .measurement_register.service import list_releases, read_release, register
 from .engine import ROOT, plan
+from .ruler_calibration.service import is_calibration_stream_key
 from .settings import DEFAULT_BUDGET, DEFAULT_DAY, MODEL_LABEL, PROJECT_NAME
 
 app = FastAPI(title=PROJECT_NAME, version="1.0.0")
@@ -34,15 +35,30 @@ SECTIONS = {
     "bridge_residuals": "replay",
     "surface_regimes": "shift",
     "lane_booking": "resources",
+    "ruler": "ruler",
+    "ruler_calibration": "ruler",
+    "ruler_corrections": "ruler",
+    "ruler_book": "ruler",
+    "calibration": "ruler",
 }
 Capacity = Annotated[int, Query(ge=0, le=100)]
 Snapshot = Annotated[int, Query(ge=70, le=36_500)]
 
 
 class Feed(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     observations: list = Field(max_length=2500)
     outcomes: list = Field(max_length=2500)
+
+    @model_validator(mode="after")
+    def reject_unknown_streams(self):
+        extra = getattr(self, "__pydantic_extra__", None) or {}
+        unknown = [
+            key for key in extra if not is_calibration_stream_key(key)
+        ]
+        if unknown:
+            raise ValueError("packet 包含不支持的记录列表")
+        return self
 
 
 class PlanInput(BaseModel):
